@@ -1,0 +1,2 @@
+@ECHO OFF
+"C:\Program Files (x86)\Atmel\AVR Tools\AvrAssembler2\avrasm2.exe" -S "C:\Users\Tryrant\Desktop\lab6summer\labels.tmp" -fI -W+ie -C V2E -o "C:\Users\Tryrant\Desktop\lab6summer\lab6summer.hex" -d "C:\Users\Tryrant\Desktop\lab6summer\lab6summer.obj" -e "C:\Users\Tryrant\Desktop\lab6summer\lab6summer.eep" -m "C:\Users\Tryrant\Desktop\lab6summer\lab6summer.map" -l "C:\Users\Tryrant\Desktop\lab6summer\lab6summer.lst" "C:\Users\Tryrant\Desktop\lab6summer\lab6summer.asm"

@@ -1,0 +1,333 @@
+
+AVRASM ver. 2.1.42                                                                 Wed Aug 15 08:10:02 2018
+   
+                 ; Lab 5 -  Take a Step, Enter Room, and a Little Animation
+                 ; Version  2.1
+                 ; Date: August 15 2018
+                 ; Written By : Christopher W. Fingers
+                 ; Lab Hours  : Monday/Wednesday 3:00pm - 6:45pm
+                 ; ----------------------------------------
+                 
+                 	.INCLUDE <m328pdef.inc>
+               
+                 	.DEF var_A = r16
+                 	.EQU S0 = 0b00			// state 0
+                 	.EQU S1 = 0b01			// state 1
+                 	.EQU S2 = 0b10			// state 2
+                 	.EQU S3 = 0b11			// state 3
+                 	; True and False
+                 
+                 	.EQU true = 0xFF
+                 	.EQU false = 0x00
+                 
+                 	;push button ports
+                 
+                 	.EQU dff_Q = PD2		//Q output for flip flop
+                 	.EQU dff_clk = PD5		//clock debounce for flip fop
+                 
+                 	.DSEG
+000100           	 room:  .BYTE   1       
+000101           	 dir:   .BYTE   1
+000102           	 next_state:  .BYTE 1	// FSM next state
+000103           	 walk:  .BYTE   1
+000104           	 row:   .BYTE 1
+000105           	 col:   .BYTE 1
+000106           	 bees:  .BYTE 1	
+                 
+                 	.CSEG
+                 	.ORG 0x0000
+                 
+                 	RST_VECT:
+000000 c23d          rjmp reset                 // jump over IVT, plus INCLUDE code
+                 
+                 	.ORG INT0addr
+000002 940c 0303 	jmp INT0_ISR
+                 
+                 	.ORG 0x0100                // bypass IVT
+                 	.INCLUDE "spi_shield.inc"
+                      	.INCLUDE "testbench.inc"   // DrawRoom and DrawDirection
+			.INCLUDE "pseudo_instr.inc"
+                       	.INCLUDE "maze.inc"
+                 
+                 reset:
+00023e ef0f      	ldi   r16,low(RAMEND)     // RAMEND address 0x08ff
+00023f bf0d      	out   SPL,r16             // stack Pointer Low SPL at i/o address 0x3d
+000240 e008      	ldi   r16,high(RAMEND)
+000241 bf0e      	out   SPH,r16             // stack Pointer High SPH at i/o address 0x3
+                 
+000242 940e 0100 	call  InitShield           // initialize GPIO Ports and SPI communications
+                 	
+                 
+                 	; Initialize External Interrupt
+000244 98e8      	cbi EIMSK, INT0
+000245 9110 001d 	lds r17, EIMSK
+000247 7f1e      	cbr r17, 0b00000001
+000248 6012      	sbr r17, 0b00000010
+000249 9310 0069 	sts EICRA, r17
+00024b 9ae8      	sbi EIMSK, INT0
+                 	// loads the 250ms delay into timer 1
+00024c e00b      	ldi r16, 0x0B
+00024d 9300 0085     sts TCNT1H, r16
+00024f ed0c          ldi r16, 0xDC
+000250 9300 0084     sts TCNT1L, r16
+000252 e013          ldi r17, (1<<CS11) | (1<<CS10)
+000253 9310 0081     sts TCCR1B, r17   
+                 
+000255 2488      	clr   spiLEDS              // clear discrete LEDs
+000256 2477      	clr   spi7SEG              // clear 7-segment display
+                 
+                 ;Initialize SRM Variables	
+000257 2700      	clr   r16                  // initalizes dir, room, walk and next state with register r16
+000258 9300 0101 	sts   dir, r16
+00025a 9300 0100 	sts   room, r16
+00025c 9300 0103 	sts   walk, r16		   // do not walk
+00025e 9300 0102 	sts   next_state, r16
+000260 9300 0105 	sts   col, r16
+000262 9300 0106 	sts   bees, r16
+000264 e104      	ldi   r16, 0x14
+000265 9300 0104 	sts   row, r16
+000267 e003      	ldi   r16, 0x03            // loads the hex number 3 into r16 and then stores the 3 into variable dir
+                 
+                 	;Initiaize pins for push-button and clock debounce
+000268 9a55      	sbi DDRD, dff_clk	// clock fip flop
+000269 9852      	cbi DDRD, dff_Q		// Q flip flop
+00026a 985a      	cbi PORTD, dff_Q	// Q flip flop
+00026b 9478      	sei					// global interrupt enabled
+                 loop:
+                 
+00026c 940e 0116 	call    ReadSwitches       // read switches into r7
+                     // dir  = switch & 0x03;
+00026e 2d06      	mov     r16, switch        // move switch (r7) to temporary register r16
+00026f 7003          cbr     r16, 0xFC          // mask-out most significant 6 bits
+000270 9300 0101     sts     dir, r16           // save formatted value to SRAM variable dir.
+                 
+                 	// state = next_state;
+000272 9130 0102 	lds r19, next_state
+                 
+                 	// state s0
+                 	State_S0:
+000274 3030      		cpi		r19, S0
+000275 f441      		brne	state_S1
+000276 9180 0100 		lds     r24, room          // calling argument room is placed in r24.
+000278 deb9      		rcall   DrawRoom		   // translate room to 7 segment bits
+000279 2e78      		mov     spi7SEG, r24       // return value, the room, is saved to 7 segment display register
+00027a e031            		ldi r19, S1
+00027b 9330 0102 		sts next_state, r19
+00027d c046      		rjmp end_state
+                 	
+                 	// state s1
+                 	State_S1:
+00027e 3031      		cpi     r19, S1				// compares immediate value of s1 with reg r19
+00027f f489      		brne    State_S2			// if value in r19 is not similar to S1 jumps to S2
+000280 9180 0100 		lds     r24, room           // calling argument dir is placed in r24.
+000282 deaf      		rcall   DrawRoom
+000283 2e78      		mov 	spi7SEG, r24
+000284 9180 0101 		lds		r24, dir
+000286 deb8      		rcall   DrawDirection      // translate direction to 7 segment bit
+000287 2a78      		or 		spi7SEG, r24
+                 		
+000288 9110 0103 		lds r17, walk
+00028a 2311      		tst r17
+00028b e030      		ldi r19, S0
+00028c f009      		breq end_S1
+00028d e032      		ldi r19, S2
+                 		end_S1:
+                 
+00028e 9330 0102 		sts next_state, r19
+000290 c033      		rjmp end_state			//break
+                 		
+                     //state S2, takes a step and updates the new room accordingly
+                 	State_S2: 
+000291 3032      		cpi r19, S2		//Similar to S1, compares r19 with S2 if value is not the same
+000292 f539      		brne State_S3		// Immediately jumps to end of state
+000293 e010      		ldi r17, false		
+000294 9310 0103 		sts walk, r17
+000296 9180 0100 		lds r24, room		// load the room, dir, row and col values to side registers
+000298 9140 0101 		lds r20, dir
+00029a 9180 0104 		lds r24, row
+00029c 9160 0105 		lds r22, col
+00029e d043      		rcall TakeAStep		// call take a step
+00029f 9360 0105 		sts col, r22		// save the new col/row values 
+0002a1 9380 0104 		sts row, r24
+0002a3 d04c      		rcall EnterRoom		// call enter room
+0002a4 2f68      		mov r22, r24		// mov the new r24 value to r22
+0002a5 7f60      		andi r22, 0xF0		// save the bee value into register r22
+0002a6 9562      		swap r22
+0002a7 9360 0106 		sts bees, r22		// save the bee value from r22 to bees
+0002a9 708f      		andi r24, 0x0F		// Find the row value by into r24
+0002aa 9380 0100 		sts room, r24		// save the r24 value into room
+0002ac 2e78      		mov spi7SEG, r24	// set 7seg
+0002ad 9180 0100 		lds r24, room
+0002af de82      		rcall DrawRoom			
+0002b0 2e78      		mov spi7SEG, r24
+                 
+0002b1 e033      		ldi r19, S3		// loads state 3 value into r19
+0002b2 9330 0102 		sts next_state, r19
+0002b4 3f8f      		cpi r24, true		// if the room value is equivalent to true the state 3
+0002b5 f009      		breq end_S2		// is loaded
+                 
+0002b6 e031      		ldi r19, S1
+                 		end_S2:
+                 
+0002b7 9330 0102 		sts next_state, r19
+0002b9 c00a      		rjmp end_state
+                 
+                 		State_S3:
+0002ba 3033      		cpi r19, S3		// compares if r19 is set to S3, if not break to end
+0002bb f441      		brne end_state
+0002bc e032      		ldi r19, S2		// loads state 2 into r19
+0002bd 9330 0102 		sts next_state, r19
+0002bf 3f8f      		cpi r24, true		// checks to see if room is a hallway if so go to state 2
+0002c0 f019      		breq end_state
+0002c1 e030      		ldi r19, S0		// if room is not a hallway go to state 0
+0002c2 9330 0102 		sts next_state, r19		
+                 
+                 		end_state:
+                 	
+                 	// blinks led when leaving a state
+0002c4 fb31      		bst r19, 1
+0002c5 f881         		bld spiLEDS, 1
+0002c6 fb30          	bst r19, 0
+0002c7 f880         	    bld spiLEDS, 0
+                 
+0002c8 9160 0106 	lds r22, bees			// loads the values 
+0002ca 9180 0100 	lds r24, room
+0002cc d040      	rcall IsHallway
+0002cd d049      	rcall TestIsHallWay
+0002ce d004      	rcall  Delay
+0002cf d00f      	rcall  Pulse
+                 	
+0002d0 940e 0121     call   WriteDisplay
+                 
+0002d2 cf99      	rjmp   loop
+                 
+                     /* Creates the delay interrupt that sets the global*/
+                     /* timer interrupt to clear and reset the timer*/
+                     
+                     Delay:
+0002d3 930f          push r16
+                     wait:
+0002d4 9bb0          sbis TIFR1, TOV1			//If overflow bit is not set then timer will wait
+0002d5 cffe          rjmp wait				// until the timer overflow bit is set
+0002d6 9ab0          sbi TIFR1, TOV1    
+0002d7 e00b          ldi r16, 0x0B			// loads a 250ms delay
+0002d8 9300 0085     sts TCNT1H, r16
+0002da ed0c          ldi r16, 0XDC
+0002db 9300 0084     sts TCNT1L, r16
+0002dd 910f          pop r16
+0002de 9508          ret
+                 
+                     /* -----PULSE SUBROUTINE-----*/
+                     ;  Pulse is called from the ISR
+                     ;  Inputs: none
+                     ;  A positive pulse cycle applied to
+                     ;  the input of the D flip-flop
+                     ;------------------------------
+                 
+                 Pulse:
+0002df 985d          cbi PORTD, dff_clk
+0002e0 9a5d          sbi PORTD, dff_clk
+0002e1 9508          ret  
+                 
+                 	TakeAStep:
+0002e2 fb40      	bst r20, 0	//load bit 0 into the t sreg bit and check if bit is set
+0002e3 f036      	brts N_E	// if set branch to a north east test
+0002e4 fb41      	bst r20, 1	// load bit 1 into t sreg bit and check if bit is set
+0002e5 f016      	brts W		// if set branch to west direction
+0002e6 9583      	inc r24		// inc r24 for moving south
+0002e7 c007      	rjmp return	// jump to return 
+                 	W:			// west direction
+0002e8 956a      	dec r22		// decrement col variable
+0002e9 c005      	rjmp return	// jump to return
+                 	N_E:		// north east test
+0002ea fb41      	bst r20, 1	// check bit 1 of direction
+0002eb f016      	brts N		// break to north if set
+0002ec 9563      	inc r22		// inc col varible if east
+0002ed c001      	rjmp return	// jump to return
+                 	N:			// north branch
+0002ee 958a      	dec r24		// dec row variable
+                 	return:		// return
+0002ef 9508      	ret
+                 
+                 	EnterRoom:
+0002f0 930f      	push r16			// push used values
+0002f1 922f      	push r2
+0002f2 93ff      	push ZH
+0002f3 93ef      	push ZL
+0002f4 eeec      	ldi ZL, low(theMaze<<1)	// load themaze table to z pointer
+0002f5 e0f2      	ldi ZH, high(theMaze<<1)
+0002f6 2422      	clr r2					
+0002f7 e104      	ldi r16, 0x14			// load our variable to multiply
+0002f8 9f80      	mul r24, r16			// multiply row by 20
+0002f9 1c12      	adc r1, r2			// set carry to r1
+0002fa 0f86      	add r24, r22			// add col to new row value
+                 
+0002fb 0de0      	add ZL, r0			// add the values to the z pointer
+0002fc 1df1      	adc ZH, r1
+                 
+0002fd 9184      	lpm r24, Z			// use indirect addressing for r24
+0002fe 91ef      	pop ZL				// pop out
+0002ff 91ff      	pop ZH
+000300 902f      	pop r2
+000301 910f      	pop r16
+000302 9508      	ret
+                 	
+                 
+                 		// timer interrupt table that clears timer if tov1 is set
+                 	INT0_ISR:
+000303 92ff      	push reg_F
+000304 b6ff      	in reg_F,SREG
+000305 930f      	push r16
+000306 ef0f      	ldi r16, true
+000307 9300 0103 	sts walk,r16
+000309 910f      	pop r16
+00030a beff      	out SREG,reg_F
+00030b 90ff      	pop reg_F
+00030c 9518      	reti
+                 
+                 	;--------------------------
+                 	;---Is this a Hallway?---
+                 ; input r24 = current room (room), r22 = bees
+                 ; output r24 = 0 if answer is false (r24 == 0), 
+                 ; otherwise theanswer is true (r24 != 0).
+                 ; The answer is true if the bear is in a hallway 
+                 ; without any bees.
+                 ; no registers are modified by this subroutine
+                 ;------------------------
+                 IsHallway:
+                 // return (bees == 0x00 && (room == 0x09 || room == 0x06));
+00030d 2366      tst r22			  // the room value of r22 is tested 
+00030e f421      brne answer_is_no		 // if the value is not a 0 or negative branch to no
+00030f 3069      cpi r22, 0x09			 // Compare the r22 value with different hallway types
+000310 f021      breq answer_is_yes		 // If any are a hallway break to yes
+000311 3066      cpi r22, 0x06
+000312 f011      breq answer_is_yes
+                 answer_is_no:
+000313 e080      ldi   r24, false               // room is not a hallway or contains bees
+000314 c001      rjmp  endOfHallway
+                 answer_is_yes:
+000315 ef8f      ldi   r24, true
+                 endOfHallway:
+000316 9508      ret
+                 
+                 ; --------------------------
+                 ; -----Test IsHallway -----
+                 ; Called from LED display section in the main loop
+                 ; Input: r24  Outputs: spiLEDs bits 5 and 4 only
+                 TestIsHallWay:
+000317 930f      push r16
+000318 2d08      mov r16, spiLEDS
+000319 2388      tst r24             // test return value from isHallway
+00031a f419      brne inHallway
+00031b 6100      sbr r16, 0b00010000 // Bear is not in hallway, so turn on LED 4
+00031c 7d0f      cbr r16, 0b00100000
+00031d c002      rjmp doneHallway
+                 inHallway:
+00031e 6200      sbr r16, 0b00100000 //Bear is in hallway, so turn on LED 5
+00031f 7e0f      cbr r16, 0b00010000
+                 doneHallway:
+000320 2e80      mov spiLEDS, r16
+000321 910f      pop r16
+000322 9508      ret
+
+Assembly complete, 0 errors, 0 warnings
